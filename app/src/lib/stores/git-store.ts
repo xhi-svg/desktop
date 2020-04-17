@@ -86,6 +86,7 @@ import { enableStashing } from '../feature-flag'
 import { getStashes, getStashedFiles } from '../git/stash'
 import { IStashEntry, StashedChangesLoadStates } from '../../models/stash-entry'
 import { PullRequest } from '../../models/pull-request'
+import { fetchTagsToPushMemoized } from './helpers/fetch-tags-to-push-memoized'
 
 /** The number of commits to load from history per batch. */
 const CommitBatchSize = 100
@@ -386,7 +387,10 @@ export class GitStore extends BaseStore {
         .shift() || null
   }
 
-  public async fetchTagsToPush(account: IGitAccount | null) {
+  public async fetchTagsToPush(
+    account: IGitAccount | null,
+    options: { forceFetch: boolean } = { forceFetch: false }
+  ) {
     const currentRemote = this._currentRemote
 
     if (currentRemote === null) {
@@ -400,9 +404,26 @@ export class GitStore extends BaseStore {
     }
     const branchName = this.tip.branch.name
 
-    const tagsToPush = await this.performFailableOperation(() =>
-      fetchTagsToPush(this.repository, account, currentRemote, branchName)
-    )
+    const tagsToPush = await this.performFailableOperation(async () => {
+      if (options.forceFetch) {
+        return fetchTagsToPush(
+          this.repository,
+          account,
+          currentRemote,
+          branchName
+        )
+      } else {
+        const localTags = await this.getAllTags()
+
+        return fetchTagsToPushMemoized(
+          localTags,
+          this.repository,
+          account,
+          currentRemote,
+          branchName
+        )
+      }
+    })
     this._tagsToPush = tagsToPush !== undefined ? tagsToPush : null
 
     this.emitUpdate()
